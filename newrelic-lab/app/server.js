@@ -1,16 +1,5 @@
-// Verificar se a license key existe antes de carregar o New Relic
-if (!process.env.NEW_RELIC_LICENSE_KEY) {
-  console.error('❌ NEW_RELIC_LICENSE_KEY não configurada!');
-  console.log('Configure a license key no arquivo .env');
-} else {
-  console.log('✅ Carregando New Relic...');
-  try {
-    require('./newrelic');
-    console.log('✅ New Relic carregado com sucesso!');
-  } catch (error) {
-    console.error('❌ Erro ao carregar New Relic:', error.message);
-  }
-}
+// Importar New Relic PRIMEIRO
+require('./newrelic');
 
 const express = require('express');
 const { Client } = require('pg');
@@ -34,13 +23,6 @@ const logger = winston.createLogger({
   ]
 });
 
-// Log de inicialização
-logger.info('🚀 Iniciando aplicação...', {
-  nodeVersion: process.version,
-  newRelicLicenseConfigured: !!process.env.NEW_RELIC_LICENSE_KEY,
-  appName: process.env.NEW_RELIC_APP_NAME
-});
-
 // Middlewares
 app.use(helmet());
 app.use(cors());
@@ -59,12 +41,10 @@ const redisClient = redis.createClient({
 async function connectDatabases() {
   try {
     await pgClient.connect();
-    logger.info('✅ Conectado ao PostgreSQL');
-    
     await redisClient.connect();
-    logger.info('✅ Conectado ao Redis');
+    logger.info('Conectado aos bancos de dados');
   } catch (error) {
-    logger.error('❌ Erro ao conectar aos bancos:', error);
+    logger.error('Erro ao conectar aos bancos:', error);
   }
 }
 
@@ -76,31 +56,18 @@ app.use((req, res, next) => {
   setTimeout(next, delay);
 });
 
-// Health check melhorado
+// Rotas da API
+
+// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    newRelic: {
-      configured: !!process.env.NEW_RELIC_LICENSE_KEY,
-      appName: process.env.NEW_RELIC_APP_NAME
-    }
+    uptime: process.uptime()
   });
 });
 
-// Rota para verificar New Relic
-app.get('/newrelic-status', (req, res) => {
-  const newrelic = require('newrelic');
-  res.json({
-    agentLoaded: !!newrelic,
-    licenseKey: process.env.NEW_RELIC_LICENSE_KEY ? 'Configurada' : 'Não configurada',
-    appName: process.env.NEW_RELIC_APP_NAME,
-    agentVersion: newrelic ? newrelic.version : 'N/A'
-  });
-});
-
-// Suas outras rotas aqui...
+// Rota com cache Redis
 app.get('/api/users', async (req, res) => {
   try {
     const cacheKey = 'users:all';
@@ -108,7 +75,7 @@ app.get('/api/users', async (req, res) => {
     // Tentar buscar do cache
     const cached = await redisClient.get(cacheKey);
     if (cached) {
-      logger.info('📋 Dados retornados do cache');
+      logger.info('Dados retornados do cache');
       return res.json(JSON.parse(cached));
     }
 
@@ -119,16 +86,18 @@ app.get('/api/users', async (req, res) => {
     // Salvar no cache por 30 segundos
     await redisClient.setEx(cacheKey, 30, JSON.stringify(users));
     
-    logger.info(`📊 Retornados ${users.length} usuários do banco`);
+    logger.info(`Retornados ${users.length} usuários do banco`);
     res.json(users);
   } catch (error) {
-    logger.error('❌ Erro ao buscar usuários:', error);
+    logger.error('Erro ao buscar usuários:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
+// Rota com consulta complexa (para demonstrar slow queries)
 app.get('/api/orders', async (req, res) => {
   try {
+    // Simular consulta complexa com JOIN
     const query = `
       SELECT o.*, u.name as user_name, u.email 
       FROM orders o 
@@ -138,14 +107,15 @@ app.get('/api/orders', async (req, res) => {
     `;
     
     const result = await pgClient.query(query);
-    logger.info(`📊 Retornados ${result.rows.length} pedidos`);
+    logger.info(`Retornados ${result.rows.length} pedidos`);
     res.json(result.rows);
   } catch (error) {
-    logger.error('❌ Erro ao buscar pedidos:', error);
+    logger.error('Erro ao buscar pedidos:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
+// Rota que ocasionalmente falha (para demonstrar error tracking)
 app.get('/api/products', async (req, res) => {
   try {
     // 10% de chance de erro
@@ -154,14 +124,15 @@ app.get('/api/products', async (req, res) => {
     }
 
     const result = await pgClient.query('SELECT * FROM products LIMIT 15');
-    logger.info(`📊 Retornados ${result.rows.length} produtos`);
+    logger.info(`Retornados ${result.rows.length} produtos`);
     res.json(result.rows);
   } catch (error) {
-    logger.error('❌ Erro ao buscar produtos:', error);
+    logger.error('Erro ao buscar produtos:', error);
     res.status(500).json({ error: 'Erro ao buscar produtos' });
   }
 });
 
+// Rota com processamento CPU intensivo
 app.get('/api/analytics', (req, res) => {
   const start = Date.now();
   
@@ -172,7 +143,7 @@ app.get('/api/analytics', (req, res) => {
   }
   
   const duration = Date.now() - start;
-  logger.info(`⚡ Processamento analytics completado em ${duration}ms`);
+  logger.info(`Processamento analytics completado em ${duration}ms`);
   
   res.json({
     result: Math.floor(result),
@@ -181,8 +152,10 @@ app.get('/api/analytics', (req, res) => {
   });
 });
 
+// Rota para criar dados de teste
 app.post('/api/seed', async (req, res) => {
   try {
+    // Inserir usuários de teste
     await pgClient.query(`
       INSERT INTO users (name, email) VALUES 
       ('João Silva', 'joao@email.com'),
@@ -191,6 +164,7 @@ app.post('/api/seed', async (req, res) => {
       ON CONFLICT (email) DO NOTHING
     `);
 
+    // Inserir produtos de teste
     await pgClient.query(`
       INSERT INTO products (name, price) VALUES 
       ('Notebook', 2500.00),
@@ -199,29 +173,28 @@ app.post('/api/seed', async (req, res) => {
       ON CONFLICT (name) DO NOTHING
     `);
 
-    logger.info('🌱 Dados de teste inseridos');
+    logger.info('Dados de teste inseridos');
     res.json({ message: 'Dados de teste criados com sucesso' });
   } catch (error) {
-    logger.error('❌ Erro ao criar dados de teste:', error);
+    logger.error('Erro ao criar dados de teste:', error);
     res.status(500).json({ error: 'Erro ao criar dados de teste' });
   }
 });
 
 // Middleware de tratamento de erros
 app.use((error, req, res, next) => {
-  logger.error('❌ Erro não tratado:', error);
+  logger.error('Erro não tratado:', error);
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
 // Iniciar servidor
 app.listen(PORT, () => {
-  logger.info(`🚀 Servidor rodando na porta ${PORT}`);
-  logger.info(`🔗 Acesse: http://localhost:${PORT}/health`);
+  logger.info(`Servidor rodando na porta ${PORT}`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  logger.info('🛑 Encerrando aplicação...');
+  logger.info('Encerrando aplicação...');
   await pgClient.end();
   await redisClient.quit();
   process.exit(0);

@@ -1,28 +1,24 @@
-version: '3.8'
-
 services:
+  # Aplicação Node.js principal
   app:
     build: ./app
     container_name: newrelic-app
     ports:
       - "3000:3000"
     environment:
-      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - NEW_RELIC_APP_NAME=Lab-NodeJS-App
+#      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+#      - NEW_RELIC_APP_NAME=Lab-NodeJS-App
       - DATABASE_URL=postgresql://labuser:labpass@postgres:5432/labdb
       - REDIS_URL=redis://redis:6379
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - postgres
+      - redis
+    volumes:
+      - ./app:/usr/src/app
+      - /usr/src/app/node_modules
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
+  # Banco de dados PostgreSQL
   postgres:
     image: postgres:15
     container_name: newrelic-postgres
@@ -36,12 +32,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U labuser -d labdb"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
+  # Redis para cache
   redis:
     image: redis:7-alpine
     container_name: newrelic-redis
@@ -49,6 +41,7 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
+  # Nginx como reverse proxy
   nginx:
     build: ./nginx
     container_name: newrelic-nginx
@@ -58,20 +51,23 @@ services:
       - app
     restart: unless-stopped
 
-  # K6 para testes de carga
-  k6:
-    image: grafana/k6:latest
-    container_name: newrelic-k6
-    volumes:
-      - ./k6:/scripts
-    environment:
-      - K6_OUT=json=/tmp/k6-results.json
+  # Gerador de carga para testes
+  load-generator:
+    image: alpine/curl
+    container_name: newrelic-load-gen
+    command: >
+      sh -c "
+        while true; do
+          curl -s http://nginx/api/users > /dev/null;
+          curl -s http://nginx/api/orders > /dev/null;
+          curl -s http://nginx/api/products > /dev/null;
+          curl -s http://nginx/health > /dev/null;
+          sleep 2;
+        done
+      "
     depends_on:
       - nginx
-    profiles:
-      - testing
-    networks:
-      - default
+    restart: unless-stopped
 
 volumes:
   postgres_data:
