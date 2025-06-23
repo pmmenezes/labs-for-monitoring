@@ -1,0 +1,229 @@
+# postgres-exporter.yml
+# Configuração do PostgreSQL Exporter
+
+# Configurações gerais
+web:
+  listen-address: ":9187"
+  telemetry-path: "/metrics"
+
+# Configurações de log
+log:
+  level: "info"
+  format: "logfmt"
+
+# Configurações de coleta
+collector:
+  # Timeout para queries
+  query-timeout: 30s
+
+  # Configurações de conexão
+  max-connections: 3
+  max-idle-connections: 3
+
+# Queries customizadas
+queries:
+  # Informações básicas do banco
+  pg_database_info:
+    query: |
+      SELECT 
+        datname as database,
+        pg_database_size(datname) as size_bytes,
+        numbackends as connections,
+        xact_commit as transactions_committed,
+        xact_rollback as transactions_rolled_back,
+        blks_read as blocks_read,
+        blks_hit as blocks_hit,
+        tup_returned as tuples_returned,
+        tup_fetched as tuples_fetched,
+        tup_inserted as tuples_inserted,
+        tup_updated as tuples_updated,
+        tup_deleted as tuples_deleted
+      FROM pg_stat_database 
+      WHERE datname NOT IN ('template0', 'template1', 'postgres')
+    metrics:
+    - database:
+        usage: "LABEL"
+        description: "Database name"
+    - size_bytes:
+        usage: "GAUGE"
+        description: "Database size in bytes"
+    - connections:
+        usage: "GAUGE"
+        description: "Number of backends currently connected"
+    - transactions_committed:
+        usage: "COUNTER"
+        description: "Number of transactions committed"
+    - transactions_rolled_back:
+        usage: "COUNTER"
+        description: "Number of transactions rolled back"
+    - blocks_read:
+        usage: "COUNTER"
+        description: "Number of disk blocks read"
+    - blocks_hit:
+        usage: "COUNTER"
+        description: "Number of buffer hits"
+    - tuples_returned:
+        usage: "COUNTER"
+        description: "Number of rows returned by queries"
+    - tuples_fetched:
+        usage: "COUNTER"
+        description: "Number of rows fetched by queries"
+    - tuples_inserted:
+        usage: "COUNTER"
+        description: "Number of rows inserted"
+    - tuples_updated:
+        usage: "COUNTER"
+        description: "Number of rows updated"
+    - tuples_deleted:
+        usage: "COUNTER"
+        description: "Number of rows deleted"
+
+  # Informações de tabelas
+  pg_table_stats:
+    query: |
+      SELECT 
+        schemaname,
+        tablename,
+        pg_total_relation_size(schemaname||'.'||tablename) as total_size_bytes,
+        pg_relation_size(schemaname||'.'||tablename) as table_size_bytes,
+        pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename) as index_size_bytes,
+        n_tup_ins as tuples_inserted,
+        n_tup_upd as tuples_updated,
+        n_tup_del as tuples_deleted,
+        n_tup_hot_upd as tuples_hot_updated,
+        n_live_tup as live_tuples,
+        n_dead_tup as dead_tuples,
+        vacuum_count,
+        autovacuum_count,
+        analyze_count,
+        autoanalyze_count
+      FROM pg_stat_user_tables 
+      JOIN pg_tables ON pg_stat_user_tables.tablename = pg_tables.tablename 
+      AND pg_stat_user_tables.schemaname = pg_tables.schemaname
+      ORDER BY total_size_bytes DESC 
+      LIMIT 50
+    metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - total_size_bytes:
+        usage: "GAUGE"
+        description: "Total table size including indexes"
+    - table_size_bytes:
+        usage: "GAUGE"
+        description: "Table size without indexes"
+    - index_size_bytes:
+        usage: "GAUGE"
+        description: "Index size"
+    - tuples_inserted:
+        usage: "COUNTER"
+        description: "Number of tuples inserted"
+    - tuples_updated:
+        usage: "COUNTER"
+        description: "Number of tuples updated"
+    - tuples_deleted:
+        usage: "COUNTER"
+        description: "Number of tuples deleted"
+    - tuples_hot_updated:
+        usage: "COUNTER"
+        description: "Number of tuples HOT updated"
+    - live_tuples:
+        usage: "GAUGE"
+        description: "Estimated number of live rows"
+    - dead_tuples:
+        usage: "GAUGE"
+        description: "Estimated number of dead rows"
+    - vacuum_count:
+        usage: "COUNTER"
+        description: "Number of times this table has been manually vacuumed"
+    - autovacuum_count:
+        usage: "COUNTER"
+        description: "Number of times this table has been vacuumed by autovacuum"
+    - analyze_count:
+        usage: "COUNTER"
+        description: "Number of times this table has been manually analyzed"
+    - autoanalyze_count:
+        usage: "COUNTER"
+        description: "Number of times this table has been analyzed by autoanalyze"
+
+  # Queries lentas (requer pg_stat_statements)
+  pg_slow_queries:
+    query: |
+      SELECT 
+        LEFT(query, 100) as query_text,
+        calls,
+        total_exec_time,
+        mean_exec_time,
+        rows,
+        100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
+      FROM pg_stat_statements 
+      WHERE calls > 10
+      ORDER BY mean_exec_time DESC 
+      LIMIT 20
+    metrics:
+    - query_text:
+        usage: "LABEL"
+        description: "Query text (truncated)"
+    - calls:
+        usage: "COUNTER"
+        description: "Number of times executed"
+    - total_exec_time:
+        usage: "COUNTER"
+        description: "Total time spent executing"
+    - mean_exec_time:
+        usage: "GAUGE"
+        description: "Mean execution time"
+    - rows:
+        usage: "COUNTER"
+        description: "Total number of rows retrieved or affected"
+    - hit_percent:
+        usage: "GAUGE"
+        description: "Cache hit percentage"
+
+  # Conexões por estado
+  pg_connections_by_state:
+    query: |
+      SELECT 
+        COALESCE(state, 'unknown') as connection_state,
+        count(*) as connections
+      FROM pg_stat_activity 
+      GROUP BY state
+    metrics:
+    - connection_state:
+        usage: "LABEL"
+        description: "Connection state"
+    - connections:
+        usage: "GAUGE"
+        description: "Number of connections in this state"
+
+  # Locks por tipo
+  pg_locks_by_type:
+    query: |
+      SELECT 
+        mode as lock_mode,
+        locktype as lock_type,
+        count(*) as locks
+      FROM pg_locks 
+      GROUP BY mode, locktype
+    metrics:
+    - lock_mode:
+        usage: "LABEL"
+        description: "Lock mode"
+    - lock_type:
+        usage: "LABEL"
+        description: "Lock type"
+    - locks:
+        usage: "GAUGE"
+        description: "Number of locks"
+
+  # Replicação (se aplicável)
+  pg_replication_lag:
+    query: |
+      SELECT 
+        client_addr,
+        application_name,
+        state,
+        EXTRACT(EPOCH FROM (now() - backend_start)) as

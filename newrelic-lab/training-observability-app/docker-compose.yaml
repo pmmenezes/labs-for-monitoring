@@ -30,7 +30,20 @@ services:
         max-size: "10m"
         max-file: "3"
   # Redis Cache 
+  redis-init:
+    image: alpine:latest
+    volumes:
+      - redis_data:/data
+    command: >
+      sh -c "
+        chown -R 999:999 /data &&
+        chmod -R 755 /data &&
+        echo 'Permissions set for Redis data directory'
+      "
+  # Redis Cache 
   redis:
+    depends_on: 
+      - redis-init
     container_name: redis
     restart: always
     image: redis:latest
@@ -38,8 +51,20 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --slowlog-log-slower-than 10000
+      --slowlog-max-len 128
+      --latency-monitor-threshold 100
+      --maxmemory-policy allkeys-lru
+      --loglevel notice
+      --databases 16
+      --dir /data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -85,14 +110,21 @@ services:
     image: prometheuscommunity/postgres-exporter:latest
     environment:
       DATA_SOURCE_NAME: "postgresql://postgres:postgres@postgres:5432/postgresdb?sslmode=disable"
-      PG_EXPORTER_EXTEND_QUERY_PATH: "/etc/postgres_exporter/queries.yaml"
+      PG_EXPORTER_WEB_LISTEN_ADDRESS: ":9187"
+      PG_EXPORTER_LOG_LEVEL: "info"
     volumes:
-      - ./config/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml
+      - ./postgres-exporter.yml:/etc/postgres_exporter/postgres_exporter.yml:ro
     ports:
       - "9187:9187"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Redis Exporter for detailed metrics
   redis-exporter:
