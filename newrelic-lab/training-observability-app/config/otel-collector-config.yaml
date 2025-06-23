@@ -1,0 +1,201 @@
+# OpenTelemetry Collector Configuration
+receivers:
+  # OTLP receivers for traces, metrics, and logs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receivers for metrics
+  prometheus:
+    config:
+      scrape_configs:
+      # PostgreSQL metrics
+      - job_name: 'postgres'
+        static_configs:
+        - targets: [ 'postgres-exporter:9187' ]
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+      # Redis metrics  
+      - job_name: 'redis'
+        static_configs:
+        - targets: [ 'redis-exporter:9121' ]
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+      # System metrics
+      - job_name: 'node'
+        static_configs:
+        - targets: [ 'node-exporter:9100' ]
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+      # OpenTelemetry Collector self-monitoring
+      - job_name: 'otel-collector'
+        static_configs:
+        - targets: [ 'localhost:8888' ]
+        scrape_interval: 15s
+
+  # Docker stats receiver
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 10s
+    timeout: 5s
+    api_version: 1.24
+
+  # File log receiver for container logs
+  filelog:
+    include:
+    - /var/lib/docker/containers/*/*.log
+    start_at: end
+    include_file_path: true
+    include_file_name: false
+    operators:
+    # Parse Docker JSON logs
+    - type: json_parser
+      id: parser-docker
+      output: extract_metadata_from_filepath
+      timestamp:
+        parse_from: attributes.time
+        layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+
+    # Extract container metadata from file path
+    - type: regex_parser
+      id: extract_metadata_from_filepath
+      regex: '^.*containers/(?P<container_id>[^/]+)/.*\.log$'
+      parse_from: attributes["log.file.path"]
+      output: add_service_name
+
+    # Add service name based on container
+    - type: add
+      id: add_service_name
+      field: resource["service.name"]
+      value: EXPR(attributes.container_id)
+
+  # Host metrics receiver
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      disk:
+      filesystem:
+      load:
+      memory:
+      network:
+      paging:
+      processes:
+      process:
+        mute_process_name_error: true
+
+processors:
+  # Batch processor for better performance
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    limit_mib: 512
+    spike_limit_mib: 128
+    check_interval: 5s
+
+  # Resource processor to add metadata
+  resource:
+    attributes:
+    - key: deployment.environment
+      value: "production"
+      action: upsert
+    - key: service.namespace
+      value: "database-stack"
+      action: upsert
+    - key: host.name
+      from_attribute: host.name
+      action: upsert
+
+  # Attributes processor for logs
+  attributes/logs:
+    actions:
+    - key: log.source
+      value: "docker"
+      action: upsert
+    - key: container.name
+      from_attribute: attrs.container_name
+      action: upsert
+
+  # Transform processor for custom metrics
+  transform:
+    metric_statements:
+    - context: metric
+      statements:
+      # Add custom labels to PostgreSQL metrics
+      - set(attributes["database.system"], "postgresql") where name == "pg_up"
+      - set(attributes["database.system"], "redis") where name == "redis_up"
+
+exporters:
+  # New Relic exporter
+  otlp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+
+  # Debug exporter (optional, for troubleshooting)
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "otel"
+    const_labels:
+      environment: "production"
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # Memory ballast for stability
+  memory_ballast:
+    size_mib: 64
+
+service:
+  extensions: [ health_check, pprof, memory_ballast ]
+
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [ otlp ]
+      processors: [ memory_limiter, resource, batch ]
+      exporters: [ otlp/newrelic ]
+
+    # Metrics pipeline
+    metrics:
+      receivers: [ otlp, prometheus, docker_stats, hostmetrics ]
+      processors: [ memory_limiter, resource, transform, batch ]
+      exporters: [ otlp/newrelic, prometheus ]
+
+    # Logs pipeline
+    logs:
+      receivers: [ otlp, filelog ]
+      processors: [ memory_limiter, resource, attributes/logs, batch ]
+      exporters: [ otlp/newrelic ]
+
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      address: 0.0.0.0:8888
