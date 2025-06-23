@@ -29,6 +29,16 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    security_opt:
+      - apparmor:unconfined
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
   # Redis Cache 
   redis-init:
     image: alpine:latest
@@ -78,6 +88,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Configurações de segurança
+    security_opt:
+      - apparmor:unconfined
+    user: "999:999"
 
 
   # OpenTelemetry Collector
@@ -104,6 +118,13 @@ services:
       - postgres
       - redis
     restart: unless-stopped
+    # Configurações de segurança mais permissivas para acesso ao sistema
+    security_opt:
+      - apparmor:unconfined
+    privileged: false
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
   # PostgreSQL Exporter for detailed metrics
   postgres-exporter:
     container_name: postgres-exporter
@@ -125,7 +146,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
+    # Configurações de segurança
+    security_opt:
+      - apparmor:unconfined
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
   # Redis Exporter for detailed metrics
   redis-exporter:
     container_name: redis-exporter
@@ -138,7 +165,13 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-
+    # Configurações de segurança
+    security_opt:
+      - apparmor:unconfined
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
   # Node Exporter for system metrics
   node-exporter:
     container_name: node-exporter
@@ -155,7 +188,16 @@ services:
     ports:
       - "9100:9100"
     restart: unless-stopped
-
+    # Configurações específicas para node-exporter
+    security_opt:
+      - apparmor:unconfined
+    cap_add:
+      - SYS_TIME
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    network_mode: host
+    pid: host
+    
 volumes:
   postgres_data:
   redis_data:
