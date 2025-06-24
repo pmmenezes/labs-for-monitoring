@@ -215,8 +215,7 @@ services:
     network_mode: host
     pid: host
     privileged: true
-    networks:
-     - default
+
 volumes:
   postgres_data:
   redis_data:
