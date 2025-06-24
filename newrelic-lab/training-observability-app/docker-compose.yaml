@@ -189,12 +189,12 @@ services:
       - "9100:9100"
     restart: unless-stopped
     # Configurações específicas para node-exporter
-    security_opt:
-      - apparmor:unconfined
+    security_opt: []
     cap_add:
       - SYS_TIME
       - SYS_PTRACE
       - DAC_READ_SEARCH
+      - NET_ADMIN
     network_mode: host
     pid: host
     privileged: true
