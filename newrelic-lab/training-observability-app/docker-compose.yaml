@@ -103,8 +103,9 @@ services:
       - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /sys:/sys:ro
-      - /proc:/proc:ro
+        #      - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
     ports:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
@@ -119,11 +120,15 @@ services:
       - redis
     restart: unless-stopped
     # Configurações de segurança mais permissivas para acesso ao sistema
-    security_opt: []
+    security_opt:
+     - apparmor:unconfined
     privileged: true
+  #  user: "0:988"   # Executa como root com grupo docker
     cap_add:
       - SYS_PTRACE
       - DAC_READ_SEARCH
+      - NET_ADMIN       # Se necessário para rede
+      - SYS_ADMIN 
   # PostgreSQL Exporter for detailed metrics
   postgres-exporter:
     container_name: postgres-exporter

@@ -44,7 +44,7 @@ receivers:
     endpoint: unix:///var/run/docker.sock
     collection_interval: 10s
     timeout: 5s
-    api_version: 1.24
+    api_version: '1.25' 
 
   # File log receiver for container logs
   filelog:
@@ -131,12 +131,12 @@ processors:
 
   # Transform processor for custom metrics
   transform:
+    error_mode: ignore
     metric_statements:
-    - context: metric
-      statements:
-      # Add custom labels to PostgreSQL metrics
-      - set(attributes["database.system"], "postgresql") where name == "pg_up"
-      - set(attributes["database.system"], "redis") where name == "redis_up"
+      - context: metric
+        statements:
+          - set(resource.attributes["database.system"], "postgresql") where name == "pg_up"
+          - set(resource.attributes["database.system"], "redis") where name == "redis_up"
 
 exporters:
   # New Relic exporter
@@ -169,11 +169,11 @@ extensions:
     endpoint: 0.0.0.0:1777
 
   # Memory ballast for stability
-  memory_ballast:
-    size_mib: 64
+ # memory_ballast:
+ #   size_mib: 64
 
 service:
-  extensions: [ health_check, pprof, memory_ballast ]
+  extensions: [ health_check, pprof]
 
   pipelines:
     # Traces pipeline
@@ -195,7 +195,6 @@ service:
       exporters: [ otlp/newrelic ]
 
   telemetry:
-    logs:
-      level: "info"
     metrics:
-      address: 0.0.0.0:8888
+      level: detailed
+
