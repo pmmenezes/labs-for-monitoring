@@ -119,8 +119,7 @@ services:
       - redis
     restart: unless-stopped
     # Configurações de segurança mais permissivas para acesso ao sistema
-    security_opt:
-      - apparmor:unconfined
+    security_opt: []
     privileged: true
     cap_add:
       - SYS_PTRACE
